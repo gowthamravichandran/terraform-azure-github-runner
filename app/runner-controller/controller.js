@@ -21,10 +21,16 @@ export const processWebhookEvents = async (event) => {
     // When queued events are received, they will be processed and added to the runner queue to handle creation
     if (event?.action === JOB_QUEUED) {
         const runnerName = `runner-${uuidv4().slice(0, 8)}`;
+        const imageConfig = event?.matched_image_config;
 
-        logger.info("Queued Event Received", runnerName);
+        if (!imageConfig) {
+            logger.warn("No matched image config found for queued event", event);
+            return false;
+        }
 
-        return runnerQueueSender(runnerName, event?.action);
+        logger.info({ runnerName, imageId: imageConfig.id }, "Queued Event Received");
+
+        return runnerQueueSender(runnerName, event?.action, imageConfig);
     }
 
     // When in-progress events are received

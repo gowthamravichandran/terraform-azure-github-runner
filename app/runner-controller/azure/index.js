@@ -50,16 +50,13 @@ const createNetworkInterface = async (name) => {
     return response.id;
 };
 
-export const createVM = async (name) => {
+export const createVM = async (name, imageConfig) => {
     const client = await getComputeClient();
     const networkInterface = await createNetworkInterface(name);
 
     const [
         resourceGroupName,
         location,
-        galleryImageId,
-        galleryImageType,
-        vmSize,
         adminPassword,
         customData,
         runnerIdentity,
@@ -67,14 +64,15 @@ export const createVM = async (name) => {
     ] = await Promise.all([
         getConfigValue("azure-resource-group-name"),
         getConfigValue("azure-location"),
-        getConfigValue("azure-gallery-image-id"),
-        getConfigValue("azure-gallery-image-type"),
-        getConfigValue("azure-vm-size"),
         getSecretValue("azure-runner-default-password"),
         getConfigValue("custom-data-script-base64-encoded"),
         getConfigValue("github-runner-identity"),
         getConfigValue("github-runner-identifier-label"),
     ]);
+
+    const galleryImageId = imageConfig.id;
+    const galleryImageType = imageConfig.type;
+    const vmSize = imageConfig.vm_size;
 
     // See Azure docs for more info on the different Azure Compute Gallery types:
     // https://learn.microsoft.com/azure/virtual-machines/azure-compute-gallery#sharing

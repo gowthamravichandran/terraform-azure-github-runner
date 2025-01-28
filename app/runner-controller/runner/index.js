@@ -9,7 +9,7 @@ import { getServiceBusClient, getServiceBusAdministrationClient } from "../azure
 import {
     addRunnerToState,
     getNumberOfRunnersFromState,
-    getNumberOfRunnersInWarmPoolFromState,
+    getWarmPoolSizeByImage,
     removeRunnerFromState,
 } from "./state.js";
 
@@ -62,7 +62,6 @@ export const processRunnerQueue = async () => {
 
         if (currentRunnerCount >= runnerMaxCount) {
             await setTimeout(1000);
-
             continue;
         }
 
@@ -82,24 +81,22 @@ export const processRunnerQueue = async () => {
 
         if (!message) {
             logger.debug("No runners on queue");
-
             continue;
         }
 
-        const runnerName = message.body.runnerName;
+        const { runnerName, imageConfig } = message.body;
 
-        logger.info({ runnerName }, "Received runner on queue");
+        logger.info({ runnerName, imageId: imageConfig?.id }, "Received runner on queue");
 
-        await createRunner(runnerName);
-        addRunnerToState(runnerName);
+        await createRunner(runnerName, imageConfig);
         await receiver.completeMessage(message);
     }
 };
 
 export const fillWarmPool = async () => {
     const logger = getLogger();
-    const warmPoolDesiredSize = Number(await getConfigValue("github-runner-warm-pool-size"));
-    const numberOfRunnersInWarmPool = getNumberOfRunnersInWarmPoolFromState();
+    const imageConfigs = JSON.parse(await getConfigValue("azure-gallery-images"));
+    const currentWarmPoolSizes = getWarmPoolSizeByImage();
     const [runnerQueueSize, stateQueueSize] = await Promise.all([
         getQueueActiveMessageCount("azure-github-runners-queue"),
         getQueueActiveMessageCount("azure-github-state-queue"),
@@ -107,16 +104,27 @@ export const fillWarmPool = async () => {
     const activeQueueOffset = runnerQueueSize - stateQueueSize;
 
     logger.debug({
-        "Desired Warm PoolSize": warmPoolDesiredSize,
-        "Current Number of Runners": numberOfRunnersInWarmPool,
+        "Image Configs": imageConfigs,
+        "Current Warm Pool Sizes": Object.fromEntries(currentWarmPoolSizes),
         "Runner Queue Count": runnerQueueSize,
         "State Queue Size": stateQueueSize,
     });
 
-    for (let i = 0; i < (warmPoolDesiredSize - numberOfRunnersInWarmPool - activeQueueOffset); i++) {
-        const runnerName = await enqueueRunnerForCreation();
+    for (const imageConfig of imageConfigs) {
+        const currentSize = currentWarmPoolSizes.get(imageConfig.id) || 0;
+        const neededRunners = imageConfig.warm_pool_size - currentSize - activeQueueOffset;
 
-        logger.info({ runnerName }, "Enqueued runner to fill warm pool");
+        logger.debug({
+            "Image ID": imageConfig.id,
+            "Desired Size": imageConfig.warm_pool_size,
+            "Current Size": currentSize,
+            "Needed Runners": neededRunners,
+        });
+
+        for (let i = 0; i < neededRunners; i++) {
+            const runnerName = await enqueueRunnerForCreation(imageConfig);
+            logger.info({ runnerName, imageId: imageConfig.id }, "Enqueued runner to fill warm pool");
+        }
     }
 };
 
@@ -133,31 +141,33 @@ export const stopRunnerQueue = async () => {
     await receiver.close;
 };
 
-export const enqueueRunnerForCreation = async () => {
+export const enqueueRunnerForCreation = async (imageConfig) => {
     const sender = await getRunnerQueueSender();
-
     const runnerName = `runner-${uuidv4().slice(0, 8)}`;
 
     await sender.sendMessages({
-        body: { runnerName },
+        body: { 
+            runnerName,
+            imageConfig
+        },
         contentType: "application/json",
     });
 
     return runnerName;
 };
 
-const createRunner = async (runnerName) => {
+const createRunner = async (runnerName, imageConfig) => {
     const logger = getLogger();
     const token = await createRegistrationToken();
 
-    logger.debug("Received createRunner trigger with param", runnerName);
+    logger.debug("Received createRunner trigger with param", { runnerName, imageConfig });
 
     await createKeyVaultSecret(runnerName, token);
-    await createVM(runnerName);
+    await createVM(runnerName, imageConfig);
 
-    addRunnerToState(runnerName);
+    addRunnerToState(runnerName, imageConfig);
 
-    logger.info({ runnerName }, "Successfully created runner");
+    logger.info({ runnerName, imageId: imageConfig.id }, "Successfully created runner");
 };
 
 export const deleteRunner = (runnerName) => {
@@ -191,7 +201,6 @@ export const getInitialRunnerWarmPool = async () => {
     return azureRunnerVMs
         .filter((vm) => {
             const githubRunner = githubRunners.find((runner) => runner.name === vm.name);
-
             return githubRunner || vm.provisioningState === "Succeeded" || vm.provisioningState === "Creating";
         })
         .map((vm) => vm.name);

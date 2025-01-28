@@ -54,3 +54,4 @@ __azurite_db*__.json
 # Terraform working files
 .terraform
 .terraform.lock.hcl
+.hai/

@@ -18,9 +18,13 @@ export const initializeRunnerState = async () => {
     });
 };
 
-export const addRunnerToState = (runnerName, busy = false) => {
+export const addRunnerToState = (runnerName, imageConfig, busy = false) => {
     runnerMap.set(runnerName, {
         busy,
+        imageId: imageConfig.id,
+        imageType: imageConfig.type,
+        labels: imageConfig.labels,
+        vmSize: imageConfig.vm_size
     });
 };
 
@@ -34,7 +38,30 @@ export const setRunnerAsBusyInState = (runnerName) => {
     });
 };
 
-export const getRunnerWarmPoolFromState = () => getRunnerState(true);
+export const getRunnerWarmPoolFromState = (imageId = null) => {
+    const result = {};
+    
+    runnerMap.forEach((runnerState, runnerName) => {
+        if (!runnerState.busy && (!imageId || runnerState.imageId === imageId)) {
+            result[runnerName] = runnerState;
+        }
+    });
+    
+    return result;
+};
+
+export const getWarmPoolSizeByImage = () => {
+    const warmPoolSizes = new Map();
+    
+    runnerMap.forEach((runnerState) => {
+        if (!runnerState.busy) {
+            const count = warmPoolSizes.get(runnerState.imageId) || 0;
+            warmPoolSizes.set(runnerState.imageId, count + 1);
+        }
+    });
+    
+    return warmPoolSizes;
+};
 
 export const getRunnerState = (onlyReturnIdleRunners = false) => {
     const result = {};

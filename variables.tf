@@ -18,32 +18,47 @@ variable "azure_subnet_id" {
   type = string
 }
 
-variable "azure_gallery_image_id" {
-  type        = string
-  default     = "/communityGalleries/liatrio-4e8ffc8d-5950-4137-b02c-df028384cdcd/images/ubuntu_gh_runner/versions/latest"
+variable "azure_gallery_images" {
+  type = list(object({
+    id = string
+    type = string
+    warm_pool_size = number
+    labels = list(string)
+    vm_size = string
+  }))
   description = <<EOF
-    The ID of the image to use. Format differs based on the value of azure_gallery_image_type.
-
-    azure_gallery_image_type: 'community'
-      '/communityGalleries/{public-gallery-name}/images/{gallery-image-definition}/versions/{image-version}'
-    azure_gallery_image_type: 'direct-shared'
-      '/subscriptions/{subscription-id}/resourceGroups/{resource-group-name}/providers/Microsoft.Compute/galleries/{gallery-name}/images/{gallery-image-definition}/versions/{image-version}'
-    azure_gallery_image_type: 'rbac'
-      '/subscriptions/{subscription-id}/resourceGroups/{resource-group-name}/providers/Microsoft.Compute/galleries/{gallery-name}/images/{gallery-image-definition}/versions/{image-version}'
+    List of image configurations for GitHub runners. Each configuration includes:
+    - id: The ID of the image to use. Format differs based on the type value:
+      type: 'community'
+        '/communityGalleries/{public-gallery-name}/images/{gallery-image-definition}/versions/{image-version}'
+      type: 'direct-shared'
+        '/subscriptions/{subscription-id}/resourceGroups/{resource-group-name}/providers/Microsoft.Compute/galleries/{gallery-name}/images/{gallery-image-definition}/versions/{image-version}'
+      type: 'rbac'
+        '/subscriptions/{subscription-id}/resourceGroups/{resource-group-name}/providers/Microsoft.Compute/galleries/{gallery-name}/images/{gallery-image-definition}/versions/{image-version}'
+    - type: Image type ('community', 'direct-shared', 'rbac')
+    - warm_pool_size: Number of idle runners to maintain for this image type
+    - labels: List of GitHub runner labels specific to this image type
+    - vm_size: Azure VM size to use for runners with this image
 
     See https://learn.microsoft.com/rest/api/compute/virtual-machines/create-or-update?tabs=HTTP#imagereference for details.
   EOF
-}
-
-variable "azure_gallery_image_type" {
-  type        = string
-  default     = "community"
-  description = "Available options: 'community', 'direct-shared', 'rbac'"
 
   validation {
-    condition     = contains(["community", "direct-shared", "rbac"], var.azure_gallery_image_type)
-    error_message = "The azure_gallery_image_type must be one of 'community', 'direct-shared', 'rbac'."
+    condition = alltrue([
+      for img in var.azure_gallery_images : contains(["community", "direct-shared", "rbac"], img.type)
+    ])
+    error_message = "The image type must be one of 'community', 'direct-shared', 'rbac'."
   }
+
+  default = [
+    {
+      id = "/communityGalleries/liatrio-4e8ffc8d-5950-4137-b02c-df028384cdcd/images/ubuntu_gh_runner/versions/latest"
+      type = "community"
+      warm_pool_size = 3
+      labels = ["azure", "vm", "ubuntu"]
+      vm_size = "Standard_D2_v4"
+    }
+  ]
 }
 
 variable "azure_vm_size" {
@@ -93,10 +108,6 @@ variable "github_runner_identifier_label" {
   description = "Special label applied to runners managed by this module. Note that if this value is changed, any active runners will no longer be managed."
 }
 
-variable "github_runner_warm_pool_size" {
-  type    = number
-  default = 3
-}
 
 variable "github_runner_maximum_count" {
   type    = number
